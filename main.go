@@ -5,7 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"log"
 	"net"
 	"net/http"
@@ -58,82 +58,105 @@ type SerializableGPU struct {
 	Quantity *SerializableResourcePair `json:"quantity"`
 }
 
-func getNodeIntel() *v1.Node {
-	node := &v1.Node{} // Initialize the node
+func getNodeIntel() (*v1.Node, error) {
+	node := &v1.Node{}
 
-	// Discover CPU resources
-	node.CPU = *parseCPUInfo()
+	cpu, err := parseCPUInfo()
+	if err != nil {
+		log.Printf("Error parsing CPU info: %v", err)
+		// Depending on your application's logic, handle partial information
+		// e.g., return nil, err
+	} else {
+		node.CPU = *cpu
+	}
 
 	resp, err := http.Get(jsonURL)
 	if err != nil {
-		fmt.Println(err)
-		return node
+		return nil, fmt.Errorf("error fetching GPU data: %w", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != 200 {
-		fmt.Println("non-200")
-		return node
+		return nil, fmt.Errorf("non-200 status code received: %d", resp.StatusCode)
 	}
 
-	body, err := ioutil.ReadAll(resp.Body)
+	body, err := io.ReadAll(resp.Body)
+
 	if err != nil {
-		fmt.Println(err)
-		return node
+		return nil, fmt.Errorf("error reading response body: %w", err)
 	}
 
 	var gpuInfos []GPUInfo
 	if err := json.Unmarshal(body, &gpuInfos); err != nil {
-		fmt.Println(err)
-		return node
+		return nil, fmt.Errorf("error unmarshaling GPU info: %w", err)
 	}
 
-	// Match GPUs based on device IDs
-	matchGPUsByDeviceID(node, gpuInfos)
+	if err := matchGPUsByDeviceID(node, gpuInfos); err != nil {
+		return nil, err
+	}
 
-	nodeAllocatableDiscovery(node)
+	if err := nodeAllocatableDiscovery(node); err != nil {
+		return nil, err
+	}
 
-	return node
+	return node, nil
 }
 
-func matchGPUsByDeviceID(node *v1.Node, gpuInfos []GPUInfo) {
-	files, err := ioutil.ReadDir(pciDevicesDir)
+func matchGPUsByDeviceID(node *v1.Node, gpuInfos []GPUInfo) error {
+	files, err := os.ReadDir(pciDevicesDir)
 	if err != nil {
-		fmt.Println(err)
-		return
+		return fmt.Errorf("error reading PCI devices directory: %w", err)
 	}
 
-	for _, f := range files {
-		vendorFilePath := filepath.Join(pciDevicesDir, f.Name(), "vendor")
-		vendorContent, err := ioutil.ReadFile(vendorFilePath)
+	for _, entry := range files {
+		fileInfo, err := entry.Info()
 		if err != nil {
+			// Handle the error, e.g., log it and continue to the next file
+			log.Printf("Error getting FileInfo for %s: %v", entry.Name(), err)
 			continue
 		}
 
-		if containsVendorID(string(vendorContent), nvidiaVendorID) {
-			deviceFilePath := filepath.Join(pciDevicesDir, f.Name(), "device")
-			deviceContent, err := ioutil.ReadFile(deviceFilePath)
-			if err != nil {
-				continue
-			}
+		if err := processFile(fileInfo, node, gpuInfos); err != nil {
+			log.Printf("Error processing file %s: %v", fileInfo.Name(), err)
+			return err
+		}
+	}
 
-			deviceID := strings.TrimSpace(string(deviceContent))[2:] // Remove the "0x" prefix and trim spaces
+	return nil
+}
 
-			for _, gpuInfo := range gpuInfos {
-				if gpuInfo.ModelID == deviceID {
-					gpu := &v1.GPUInfo{
-						Vendor:    gpuInfo.Vendor,
-						Name:      gpuInfo.Name,
-						ModelID:   gpuInfo.ModelID,
-						Interface: gpuInfo.Interface,
-						Memory:    gpuInfo.Memory,
-					}
-					node.Gpus.Info = append(node.Gpus.Info, gpu)
-					break
+func processFile(f os.FileInfo, node *v1.Node, gpuInfos []GPUInfo) error {
+	vendorFilePath := filepath.Join(pciDevicesDir, f.Name(), "vendor")
+	vendorContent, err := os.ReadFile(vendorFilePath)
+	if err != nil {
+		return fmt.Errorf("error reading vendor file '%s': %w", vendorFilePath, err)
+	}
+
+	if containsVendorID(string(vendorContent), nvidiaVendorID) {
+		deviceFilePath := filepath.Join(pciDevicesDir, f.Name(), "device")
+		deviceContent, err := os.ReadFile(deviceFilePath)
+		if err != nil {
+			return fmt.Errorf("error reading device file '%s': %w", deviceFilePath, err)
+		}
+
+		deviceID := strings.TrimSpace(string(deviceContent))[2:] // Remove the "0x" prefix and trim spaces
+
+		for _, gpuInfo := range gpuInfos {
+			if gpuInfo.ModelID == deviceID {
+				gpu := &v1.GPUInfo{
+					Vendor:    gpuInfo.Vendor,
+					Name:      gpuInfo.Name,
+					ModelID:   gpuInfo.ModelID,
+					Interface: gpuInfo.Interface,
+					Memory:    gpuInfo.Memory,
 				}
+				node.Gpus.Info = append(node.Gpus.Info, gpu)
+				break
 			}
 		}
 	}
+
+	return nil
 }
 
 func containsVendorID(content, vendorID string) bool {
@@ -141,11 +164,10 @@ func containsVendorID(content, vendorID string) bool {
 	return strings.HasSuffix(trimmedContent, vendorID)
 }
 
-func parseCPUInfo() *v1.CPU {
+func parseCPUInfo() (*v1.CPU, error) {
 	file, err := os.Open("/proc/cpuinfo")
 	if err != nil {
-		fmt.Print(err)
-		return nil
+		return nil, fmt.Errorf("failed to open /proc/cpuinfo: %w", err)
 	}
 	defer file.Close()
 
@@ -181,11 +203,15 @@ func parseCPUInfo() *v1.CPU {
 			if currentCPU != nil {
 				cores, err := strconv.ParseUint(value, 10, 32)
 				if err != nil {
-					return nil
+					return nil, fmt.Errorf("failed to parse CPU cores from /proc/cpuinfo: %w", err)
 				}
 				currentCPU.Vcores = uint32(cores)
 			}
 		}
+	}
+
+	if err := scanner.Err(); err != nil {
+		return nil, fmt.Errorf("error reading from /proc/cpuinfo: %w", err)
 	}
 
 	cpu := &v1.CPU{
@@ -195,7 +221,7 @@ func parseCPUInfo() *v1.CPU {
 		cpu.Info = append(cpu.Info, info)
 	}
 
-	return cpu
+	return cpu, nil
 }
 
 type msgServiceServer struct {
@@ -203,9 +229,12 @@ type msgServiceServer struct {
 }
 
 func (s *msgServiceServer) QueryNode(empty *v1.VoidNoParam, stream v1.Msg_QueryNodeServer) error {
-
 	for {
-		node := getNodeIntel()
+		node, err := getNodeIntel()
+		if err != nil {
+			log.Printf("Error getting node intelligence: %v", err)
+			return err
+		}
 
 		node2 := v1.Node{}
 		node2.CPU.Info = node.CPU.Info
@@ -265,7 +294,6 @@ func (s *msgServiceServer) QueryNode(empty *v1.VoidNoParam, stream v1.Msg_QueryN
 		fmt.Println("currentNodeData: ", currentNodeData)
 		fmt.Println("node2: ", node2)
 		if !reflect.DeepEqual(currentNodeData, node2) {
-
 			currentNodeData = node2 // Update the current data with the new data
 
 			// Send stream to subscribed gRPC clients
@@ -282,55 +310,55 @@ func (s *msgServiceServer) QueryNode(empty *v1.VoidNoParam, stream v1.Msg_QueryN
 	}
 }
 
-func getAllocatedResourceForNode(clientset *kubernetes.Clientset, nodeName string, resourceName corev1.ResourceName) int64 {
+func getAllocatedResourceForNode(clientset *kubernetes.Clientset, nodeName string, resourceName corev1.ResourceName) (int64, error) {
 	var totalAllocated int64
 
 	podList, err := clientset.CoreV1().Pods("").List(context.TODO(), metav1.ListOptions{
 		FieldSelector: fmt.Sprintf("spec.nodeName=%s,status.phase=Running", nodeName),
 	})
 	if err != nil {
-		fmt.Printf("Error fetching pods for node %s: %v\n", nodeName, err)
-		return totalAllocated
+		return 0, fmt.Errorf("error fetching pods for node %s: %w", nodeName, err)
 	}
 
 	for _, pod := range podList.Items {
 		for _, container := range pod.Spec.Containers {
 			if value, ok := container.Resources.Requests[resourceName]; ok {
-				allocated, _ := value.AsInt64()
-				totalAllocated += allocated
+				if resourceName == corev1.ResourceCPU {
+					totalAllocated += value.MilliValue() // Use MilliValue for CPU resources
+				} else {
+					allocated, _ := value.AsInt64() // AsInt64 can be used for other resources
+					totalAllocated += allocated
+				}
 			}
 		}
 	}
-	return totalAllocated
+
+	return totalAllocated, nil
 }
 
-func nodeAllocatableDiscovery(node *v1.Node) {
+func nodeAllocatableDiscovery(node *v1.Node) error {
 	// Get the node name from the environment variable set by the Downward API
 	currentNodeName := os.Getenv("NODE_NAME")
 	if currentNodeName == "" {
-		fmt.Println("NODE_NAME environment variable not set")
-		os.Exit(1)
+		return fmt.Errorf("NODE_NAME environment variable not set")
 	}
 
 	// Use the in-cluster config. This will fall back to using the service account that is mounted by default by Kubernetes
 	// But you need to be aware that this might not work if you are running this outside of Kubernetes
 	config, err := rest.InClusterConfig()
 	if err != nil {
-		fmt.Printf("Error obtaining in-cluster config: %v\n", err)
-		os.Exit(1)
+		return fmt.Errorf("error obtaining in-cluster config: %w", err)
 	}
 
 	clientset, err := kubernetes.NewForConfig(config)
 	if err != nil {
-		fmt.Printf("Error creating Kubernetes client: %v\n", err)
-		os.Exit(1)
+		return fmt.Errorf("error creating Kubernetes client: %w", err)
 	}
 
 	// Fetch only the details for the current node
 	knode, err := clientset.CoreV1().Nodes().Get(context.TODO(), currentNodeName, metav1.GetOptions{})
 	if err != nil {
-		fmt.Printf("Error fetching node %s: %v\n", currentNodeName, err)
-		os.Exit(1)
+		return fmt.Errorf("error fetching node %s: %w", currentNodeName, err)
 	}
 
 	// Extract the allocatable and allocated resources from the current node
@@ -339,10 +367,24 @@ func nodeAllocatableDiscovery(node *v1.Node) {
 	memTotal := knode.Status.Capacity[corev1.ResourceName(memResourceName)]
 	storageTotal := knode.Status.Capacity[corev1.ResourceName(storageResourceName)]
 
-	AllocatedGPUs := getAllocatedResourceForNode(clientset, knode.Name, corev1.ResourceName(gpuResourceName))
-	allocatedCPUs := getAllocatedResourceForNode(clientset, knode.Name, corev1.ResourceName(cpuResourceName))
-	allocatedMemory := getAllocatedResourceForNode(clientset, knode.Name, corev1.ResourceName(memResourceName))
-	allocatedStorage := getAllocatedResourceForNode(clientset, knode.Name, corev1.ResourceName(storageResourceName))
+	AllocatedGPUs, err := getAllocatedResourceForNode(clientset, knode.Name, corev1.ResourceName(gpuResourceName))
+	if err != nil {
+		return fmt.Errorf("error getting allocated GPUs: %w", err)
+	}
+	allocatedCPUs, err := getAllocatedResourceForNode(clientset, knode.Name, corev1.ResourceName(cpuResourceName))
+	if err != nil {
+		return fmt.Errorf("error getting allocated CPUs: %w", err)
+	}
+
+	allocatedMemory, err := getAllocatedResourceForNode(clientset, knode.Name, corev1.ResourceName(memResourceName))
+	if err != nil {
+		return fmt.Errorf("error getting allocated memory: %w", err)
+	}
+
+	allocatedStorage, err := getAllocatedResourceForNode(clientset, knode.Name, corev1.ResourceName(storageResourceName))
+	if err != nil {
+		return fmt.Errorf("error getting allocated storage: %w", err)
+	}
 
 	AllocatedGPUsQuantity := resource.NewQuantity(int64(AllocatedGPUs), resource.DecimalSI)
 	allocatedCPUsQuantity := resource.NewQuantity(int64(allocatedCPUs), resource.DecimalSI)
@@ -384,6 +426,7 @@ func nodeAllocatableDiscovery(node *v1.Node) {
 				Vcores: info.Vcores,
 			}
 		}
+		return nil
 	}
 
 	cpus := v1.CPU{
@@ -415,6 +458,8 @@ func nodeAllocatableDiscovery(node *v1.Node) {
 	node.CPU = cpus
 	node.Memory = memory
 	node.Storage = storage
+
+	return nil
 }
 
 func main() {
