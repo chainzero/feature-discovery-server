@@ -54,7 +54,9 @@ spec:
       serviceAccountName: hostfeaturediscovery-sa
       containers:
       - name: hostfeaturediscovery
-        image: scarruthers/hostfeaturediscovery:v22
+        # image: scarruthers/hostfeaturediscovery:v22 # known working ver
+        # image: scarruthers/hostfeaturediscovery:v38 # known working ver
+        image: scarruthers/hostfeaturediscovery:v59 # testing ver
         imagePullPolicy: IfNotPresent
         ports:
         - containerPort: 50051
