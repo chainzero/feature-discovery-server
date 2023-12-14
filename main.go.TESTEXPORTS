@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strconv"
 	"strings"
 	"time"
@@ -267,92 +268,73 @@ func (s *msgServiceServer) QueryNode(empty *v1.VoidNoParam, stream v1.Msg_QueryN
 			return err
 		}
 
-		jsonNode, err := json.Marshal(node)
-		if err != nil {
-			log.Fatalf("Error occurred during marshalling: %s", err)
+		node2 := v1.Node{}
+		node2.CPU.Info = node.CPU.Info
+		node2.Gpus.Info = node.Gpus.Info
+		node2.Memory.Info = node.Memory.Info
+		node2.Storage.Info = node.Storage.Info
+
+		// CPU Logic to deal with unexported fields in Kubernetes API machinery API > Quantity struct
+
+		// Check if QuantityLocal is nil and initialize if necessary
+		if node2.CPU.QuantityLocal == nil {
+			node2.CPU.QuantityLocal = &v1.ResourcePairLocal{}
 		}
 
-		fmt.Println("jsonNode in QueryNode: ", string(jsonNode))
+		allocatableStrCpu := node.CPU.Quantity.Allocatable.String()
+		node2.CPU.QuantityLocal.Allocatable = allocatableStrCpu
+		allocatatedStrCpu := node.CPU.Quantity.Allocated.String()
+		node2.CPU.QuantityLocal.Allocated = allocatatedStrCpu
 
-		fmt.Println("###Node in QueryNode: ", node)
+		// GPU Logic to deal with unexported fields in Kubernetes API machinery API > Quantity struct
 
-		// node2 := v1.Node{}
-		// node2.CPU.Info = node.CPU.Info
-		// node2.Gpus.Info = node.Gpus.Info
-		// node2.Memory.Info = node.Memory.Info
-		// node2.Storage.Info = node.Storage.Info
+		// Check if QuantityLocal is nil and initialize if necessary
+		if node2.Gpus.QuantityLocal == nil {
+			node2.Gpus.QuantityLocal = &v1.ResourcePairLocal{}
+		}
 
-		// // CPU Logic to deal with unexported fields in Kubernetes API machinery API > Quantity struct
+		allocatableStrGpu := node.Gpus.Quantity.Allocatable.String()
+		node2.Gpus.QuantityLocal.Allocatable = allocatableStrGpu
+		allocatatedStrGpu := node.Gpus.Quantity.Allocated.String()
+		node2.Gpus.QuantityLocal.Allocated = allocatatedStrGpu
 
-		// // Check if QuantityLocal is nil and initialize if necessary
-		// if node2.CPU.QuantityLocal == nil {
-		// 	node2.CPU.QuantityLocal = &v1.ResourcePairLocal{}
-		// }
+		// Memory Logic to deal with unexported fields in Kubernetes API machinery API > Quantity struct
 
-		// allocatableStrCpu := node.CPU.Quantity.Allocatable.String()
-		// node2.CPU.QuantityLocal.Allocatable = allocatableStrCpu
-		// allocatatedStrCpu := node.CPU.Quantity.Allocated.String()
-		// node2.CPU.QuantityLocal.Allocated = allocatatedStrCpu
+		// Check if QuantityLocal is nil and initialize if necessary
+		if node2.Memory.QuantityLocal == nil {
+			node2.Memory.QuantityLocal = &v1.ResourcePairLocal{}
+		}
 
-		// allocatableStrCpu := node.CPU.Quantity.Allocatable.String()
-		// node2.CPU.QuantityLocal.Allocatable = allocatableStrCpu
-		// allocatatedStrCpu := node.CPU.Quantity.Allocated.String()
-		// node2.CPU.QuantityLocal.Allocated = allocatatedStrCpu
-
-		// // GPU Logic to deal with unexported fields in Kubernetes API machinery API > Quantity struct
-
-		// // Check if QuantityLocal is nil and initialize if necessary
-		// if node2.Gpus.QuantityLocal == nil {
-		// 	node2.Gpus.QuantityLocal = &v1.ResourcePairLocal{}
-		// }
-
-		// allocatableStrGpu := node.Gpus.Quantity.Allocatable.String()
-		// node2.Gpus.QuantityLocal.Allocatable = allocatableStrGpu
-		// allocatatedStrGpu := node.Gpus.Quantity.Allocated.String()
-		// node2.Gpus.QuantityLocal.Allocated = allocatatedStrGpu
-
-		// // Memory Logic to deal with unexported fields in Kubernetes API machinery API > Quantity struct
-
-		// // Check if QuantityLocal is nil and initialize if necessary
-		// if node2.Memory.QuantityLocal == nil {
-		// 	node2.Memory.QuantityLocal = &v1.ResourcePairLocal{}
-		// }
-
-		// allocatableStrMem := node.Memory.Quantity.Allocatable.String()
-		// node2.Memory.QuantityLocal.Allocatable = allocatableStrMem
-		// allocatatedStrMem := node.Memory.Quantity.Allocated.String()
-		// node2.Memory.QuantityLocal.Allocated = allocatatedStrMem
+		allocatableStrMem := node.Memory.Quantity.Allocatable.String()
+		node2.Memory.QuantityLocal.Allocatable = allocatableStrMem
+		allocatatedStrMem := node.Memory.Quantity.Allocated.String()
+		node2.Memory.QuantityLocal.Allocated = allocatatedStrMem
 
 		// Storage Logic to deal with unexported fields in Kubernetes API machinery API > Quantity struct
 
-		// // Check if QuantityLocal is nil and initialize if necessary
-		// if node2.Storage.QuantityLocal == nil {
-		// 	node2.Storage.QuantityLocal = &v1.ResourcePairLocal{}
-		// }
+		// Check if QuantityLocal is nil and initialize if necessary
+		if node2.Storage.QuantityLocal == nil {
+			node2.Storage.QuantityLocal = &v1.ResourcePairLocal{}
+		}
 
-		// allocatableStrStorage := node.Storage.Quantity.Allocatable.String()
-		// node2.Storage.QuantityLocal.Allocatable = allocatableStrStorage
-		// allocatatedStrStorage := node.Storage.Quantity.Allocated.String()
-		// node2.Storage.QuantityLocal.Allocated = allocatatedStrStorage
+		allocatableStrStorage := node.Storage.Quantity.Allocatable.String()
+		node2.Storage.QuantityLocal.Allocatable = allocatableStrStorage
+		allocatatedStrStorage := node.Storage.Quantity.Allocated.String()
+		node2.Storage.QuantityLocal.Allocated = allocatatedStrStorage
 
 		log.Println("currentNodeData: ", currentNodeData)
 
-		// // Check if data collected has updated and only send to gRPC stream if there is an update
-		// TEMP REMOVING - REINTRO AFTER TESTING
-		// if !reflect.DeepEqual(currentNodeData, node2) {
-		// 	currentNodeData = node2 // Update the current data with the new data
+		// Check if data collected has updated and only send to gRPC stream if there is an update
+		if !reflect.DeepEqual(currentNodeData, node2) {
+			currentNodeData = node2 // Update the current data with the new data
 
-		// 	// Send stream to subscribed gRPC clients
-		// 	fmt.Printf("Data sent to gRPC server stream: %+v\n", node2)
-		// 	if err := stream.Send(&node2); err != nil {
-		// 		return err
-		// 	}
-		// } else {
-		// 	fmt.Println("No changes detected in node data.")
-		// }
-
-		if err := stream.Send(node); err != nil {
-			return err
+			// Send stream to subscribed gRPC clients
+			fmt.Printf("Data sent to gRPC server stream: %+v\n", node2)
+			if err := stream.Send(&node2); err != nil {
+				return err
+			}
+		} else {
+			fmt.Println("No changes detected in node data.")
 		}
 
 		// Sleep or wait for some event before sending the next node
@@ -487,6 +469,7 @@ func nodeAllocatableDiscovery(ctx context.Context, node *v1.Node) error {
 				Vcores: info.Vcores,
 			}
 		}
+		return nil
 	}
 
 	cpus := v1.CPU{
@@ -518,15 +501,6 @@ func nodeAllocatableDiscovery(ctx context.Context, node *v1.Node) error {
 	node.CPU = cpus
 	node.Memory = memory
 	node.Storage = storage
-
-	jsonNode, err := json.Marshal(node)
-	if err != nil {
-		log.Fatalf("Error occurred during marshalling: %s", err)
-	}
-
-	fmt.Println("jsonNode at end of nodeAllocatableDiscovery: ", string(jsonNode))
-
-	fmt.Println("###Node at end of nodeAllocatableDiscovery: ", node)
 
 	return nil
 }
