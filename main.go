@@ -276,69 +276,7 @@ func (s *msgServiceServer) QueryNode(empty *v1.VoidNoParam, stream v1.Msg_QueryN
 
 		fmt.Println("###Node in QueryNode: ", node)
 
-		// node2 := v1.Node{}
-		// node2.CPU.Info = node.CPU.Info
-		// node2.Gpus.Info = node.Gpus.Info
-		// node2.Memory.Info = node.Memory.Info
-		// node2.Storage.Info = node.Storage.Info
-
-		// // CPU Logic to deal with unexported fields in Kubernetes API machinery API > Quantity struct
-
-		// // Check if QuantityLocal is nil and initialize if necessary
-		// if node2.CPU.QuantityLocal == nil {
-		// 	node2.CPU.QuantityLocal = &v1.ResourcePairLocal{}
-		// }
-
-		// allocatableStrCpu := node.CPU.Quantity.Allocatable.String()
-		// node2.CPU.QuantityLocal.Allocatable = allocatableStrCpu
-		// allocatatedStrCpu := node.CPU.Quantity.Allocated.String()
-		// node2.CPU.QuantityLocal.Allocated = allocatatedStrCpu
-
-		// allocatableStrCpu := node.CPU.Quantity.Allocatable.String()
-		// node2.CPU.QuantityLocal.Allocatable = allocatableStrCpu
-		// allocatatedStrCpu := node.CPU.Quantity.Allocated.String()
-		// node2.CPU.QuantityLocal.Allocated = allocatatedStrCpu
-
-		// // GPU Logic to deal with unexported fields in Kubernetes API machinery API > Quantity struct
-
-		// // Check if QuantityLocal is nil and initialize if necessary
-		// if node2.Gpus.QuantityLocal == nil {
-		// 	node2.Gpus.QuantityLocal = &v1.ResourcePairLocal{}
-		// }
-
-		// allocatableStrGpu := node.Gpus.Quantity.Allocatable.String()
-		// node2.Gpus.QuantityLocal.Allocatable = allocatableStrGpu
-		// allocatatedStrGpu := node.Gpus.Quantity.Allocated.String()
-		// node2.Gpus.QuantityLocal.Allocated = allocatatedStrGpu
-
-		// // Memory Logic to deal with unexported fields in Kubernetes API machinery API > Quantity struct
-
-		// // Check if QuantityLocal is nil and initialize if necessary
-		// if node2.Memory.QuantityLocal == nil {
-		// 	node2.Memory.QuantityLocal = &v1.ResourcePairLocal{}
-		// }
-
-		// allocatableStrMem := node.Memory.Quantity.Allocatable.String()
-		// node2.Memory.QuantityLocal.Allocatable = allocatableStrMem
-		// allocatatedStrMem := node.Memory.Quantity.Allocated.String()
-		// node2.Memory.QuantityLocal.Allocated = allocatatedStrMem
-
-		// Storage Logic to deal with unexported fields in Kubernetes API machinery API > Quantity struct
-
-		// // Check if QuantityLocal is nil and initialize if necessary
-		// if node2.Storage.QuantityLocal == nil {
-		// 	node2.Storage.QuantityLocal = &v1.ResourcePairLocal{}
-		// }
-
-		// allocatableStrStorage := node.Storage.Quantity.Allocatable.String()
-		// node2.Storage.QuantityLocal.Allocatable = allocatableStrStorage
-		// allocatatedStrStorage := node.Storage.Quantity.Allocated.String()
-		// node2.Storage.QuantityLocal.Allocated = allocatatedStrStorage
-
-		log.Println("currentNodeData: ", currentNodeData)
-
 		// // Check if data collected has updated and only send to gRPC stream if there is an update
-		// TEMP REMOVING - REINTRO AFTER TESTING
 		// if !reflect.DeepEqual(currentNodeData, node2) {
 		// 	currentNodeData = node2 // Update the current data with the new data
 
