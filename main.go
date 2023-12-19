@@ -24,14 +24,16 @@ import (
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 
-	v1 "akash-api/v1"
+	// v1 "akash-api/v1"
+
+	v1 "github.com/akash-network/akash-api/go/inventory/v1"
 )
 
 const (
 	nvidiaVendorID = "10de"
 	pciDevicesDir  = "/sys/bus/pci/devices/"
-	jsonURL        = "https://gist.githubusercontent.com/chainzero/279e737f85d71084725ffde7821a9084/raw/c7878123bf8cc8646798fedc80f17ba08494f601/akashGpuDatabase.json"
-
+	// jsonURL             = "https://gist.githubusercontent.com/chainzero/279e737f85d71084725ffde7821a9084/raw/8e891b06c4faa3337a8c62cef917abe353dd9274/akashGpuDatabase.json"
+	gistID              = "279e737f85d71084725ffde7821a9084"
 	gpuResourceName     = "nvidia.com/gpu"
 	cpuResourceName     = "cpu"
 	memResourceName     = "memory"
@@ -75,30 +77,50 @@ func getNodeIntel() (*v1.Node, error) {
 	ctxHTTP, cancelHTTP := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancelHTTP()
 
-	// Create a new HTTP request with context
-	req, err := http.NewRequestWithContext(ctxHTTP, "GET", jsonURL, nil)
+	// GitHub API URL for the Gist
+	gistAPIURL := fmt.Sprintf("https://api.github.com/gists/%s", gistID)
+
+	// Create a new HTTP request with context for the GitHub API
+	req, err := http.NewRequestWithContext(ctxHTTP, "GET", gistAPIURL, nil)
 	if err != nil {
-		return nil, fmt.Errorf("error creating request: %w", err)
+		return nil, fmt.Errorf("error creating request for GitHub API: %w", err)
 	}
 
 	// Use http.Client to do the request
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("error fetching GPU data: %w", err)
+		return nil, fmt.Errorf("error fetching Gist from GitHub API: %w", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("non-200 status code received: %d", resp.StatusCode)
+		return nil, fmt.Errorf("non-200 status code received from GitHub API: %d", resp.StatusCode)
 	}
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, fmt.Errorf("error reading response body: %w", err)
+		return nil, fmt.Errorf("error reading response body from GitHub API: %w", err)
+	}
+
+	// Parse the response to get the file content
+	var gistResponse struct {
+		Files map[string]struct {
+			Filename string `json:"filename"`
+			Content  string `json:"content"`
+		} `json:"files"`
+	}
+	if err := json.Unmarshal(body, &gistResponse); err != nil {
+		return nil, fmt.Errorf("error unmarshaling response from GitHub API: %w", err)
+	}
+
+	// Assuming the file name is known and constant
+	gpuData, ok := gistResponse.Files["akashGpuDatabase.json"]
+	if !ok {
+		return nil, fmt.Errorf("GPU data file not found in Gist")
 	}
 
 	var gpuInfos []GPUInfo
-	if err := json.Unmarshal(body, &gpuInfos); err != nil {
+	if err := json.Unmarshal([]byte(gpuData.Content), &gpuInfos); err != nil {
 		return nil, fmt.Errorf("error unmarshaling GPU info: %w", err)
 	}
 
@@ -165,16 +187,25 @@ func processFile(f os.FileInfo, node *v1.Node, gpuInfos []GPUInfo) error {
 
 		for _, gpuInfo := range gpuInfos {
 			if gpuInfo.ModelID == deviceID {
-				gpu := &v1.GPUInfo{
-					Vendor:    gpuInfo.Vendor,
-					Name:      gpuInfo.Name,
-					ModelID:   gpuInfo.ModelID,
-					Interface: gpuInfo.Interface,
-					Memory:    gpuInfo.Memory,
+				gpu := &v1.GPU{
+					Info: v1.GPUInfo{
+						Vendor:     gpuInfo.Vendor,
+						Name:       gpuInfo.Name,
+						ModelID:    gpuInfo.ModelID,
+						Interface:  gpuInfo.Interface,
+						MemorySize: gpuInfo.Memory,
+					},
+					Quantity: v1.ResourcePair{
+						// Leave blank as these are set in the nodeAllocatableDiscovery function
+					},
 				}
-				node.Gpus.Info = append(node.Gpus.Info, gpu)
+				node.Gpus = append(node.Gpus, *gpu)
 				break
 			}
+		}
+
+		if len(node.Gpus) == 0 {
+			log.Println("####GPU with following model ID must be added to GPU database: ", deviceID)
 		}
 	}
 
@@ -200,10 +231,8 @@ func parseCPUInfo(ctx context.Context) (*v1.CPU, error) {
 	cpuInfoMap := make(map[string]*v1.CPUInfo)
 	scanner := bufio.NewScanner(file)
 
-	var currentCPU *v1.CPUInfo
 	for scanner.Scan() {
 		if err := ctx.Err(); err != nil {
-			fmt.Println("within context error")
 			return nil, err // return early if context is timed out
 		}
 
@@ -221,22 +250,20 @@ func parseCPUInfo(ctx context.Context) (*v1.CPU, error) {
 			if _, exists := cpuInfoMap[value]; !exists {
 				cpuInfoMap[value] = &v1.CPUInfo{ID: value}
 			}
-			currentCPU = cpuInfoMap[value]
-		case "vendor_id":
-			if currentCPU != nil {
-				currentCPU.Vendor = value
-			}
-		case "model name":
-			if currentCPU != nil {
-				currentCPU.Model = value
-			}
-		case "cpu cores":
-			if currentCPU != nil {
-				cores, err := strconv.ParseUint(value, 10, 32)
-				if err != nil {
-					return nil, fmt.Errorf("failed to parse CPU cores from /proc/cpuinfo: %w", err)
+		case "vendor_id", "model name", "cpu cores":
+			if currentCPU, exists := cpuInfoMap[value]; exists {
+				switch key {
+				case "vendor_id":
+					currentCPU.Vendor = value
+				case "model name":
+					currentCPU.Model = value
+				case "cpu cores":
+					cores, err := strconv.ParseUint(value, 10, 32)
+					if err != nil {
+						return nil, fmt.Errorf("failed to parse CPU cores from /proc/cpuinfo: %w", err)
+					}
+					currentCPU.Vcores = uint32(cores)
 				}
-				currentCPU.Vcores = uint32(cores)
 			}
 		}
 	}
@@ -245,11 +272,17 @@ func parseCPUInfo(ctx context.Context) (*v1.CPU, error) {
 		return nil, fmt.Errorf("error reading from /proc/cpuinfo: %w", err)
 	}
 
-	cpu := &v1.CPU{
-		Info: make([]*v1.CPUInfo, 0, len(cpuInfoMap)),
-	}
+	// Dereference pointers when appending to cpuInfos
+	cpuInfos := make([]v1.CPUInfo, 0, len(cpuInfoMap))
 	for _, info := range cpuInfoMap {
-		cpu.Info = append(cpu.Info, info)
+		if info != nil {
+			cpuInfos = append(cpuInfos, *info)
+		}
+	}
+
+	cpu := &v1.CPU{
+		Quantity: v1.ResourcePair{}, // Leave blank as this will be set later
+		Info:     cpuInfos,          // Non-pointer slice
 	}
 
 	return cpu, nil
@@ -267,15 +300,6 @@ func (s *msgServiceServer) QueryNode(empty *v1.VoidNoParam, stream v1.Msg_QueryN
 			return err
 		}
 
-		jsonNode, err := json.Marshal(node)
-		if err != nil {
-			log.Fatalf("Error occurred during marshalling: %s", err)
-		}
-
-		fmt.Println("jsonNode in QueryNode: ", string(jsonNode))
-
-		fmt.Println("###Node in QueryNode: ", node)
-
 		// // Check if data collected has updated and only send to gRPC stream if there is an update
 		// if !reflect.DeepEqual(currentNodeData, node2) {
 		// 	currentNodeData = node2 // Update the current data with the new data
@@ -292,6 +316,15 @@ func (s *msgServiceServer) QueryNode(empty *v1.VoidNoParam, stream v1.Msg_QueryN
 		if err := stream.Send(node); err != nil {
 			return err
 		}
+
+		// Marshal the node to JSON for log entry
+		nodeJSON, err := json.Marshal(node)
+		if err != nil {
+			log.Printf("Error marshaling node to JSON: %v", err)
+			return err
+		}
+
+		log.Printf("Node data sent to gRPC server stream: %s", nodeJSON)
 
 		// Sleep or wait for some event before sending the next node
 		time.Sleep(5 * time.Second)
@@ -373,98 +406,44 @@ func nodeAllocatableDiscovery(ctx context.Context, node *v1.Node) error {
 		return fmt.Errorf("error getting allocated storage: %w", err)
 	}
 
+	// Convert allocated resources to ResourcePair
 	AllocatedGPUsQuantity := resource.NewQuantity(int64(AllocatedGPUs), resource.DecimalSI)
 	allocatedCPUsQuantity := resource.NewQuantity(int64(allocatedCPUs), resource.DecimalSI)
 	allocatedMemoryQuantity := resource.NewQuantity(int64(allocatedMemory), resource.DecimalSI)
 	allocatedStorageQuantity := resource.NewQuantity(int64(allocatedStorage), resource.DecimalSI)
 
-	// Construct the GPU info
-	var gpuInfos []*v1.GPUInfo
-	if len(node.Gpus.Info) > 0 {
-		gpuInfos = make([]*v1.GPUInfo, len(node.Gpus.Info))
-		for i, info := range node.Gpus.Info {
-			gpuInfos[i] = &v1.GPUInfo{
-				Vendor:    info.Vendor,
-				Name:      info.Name,
-				ModelID:   info.ModelID,
-				Interface: info.Interface,
-				Memory:    info.Memory,
-			}
+	// Update GPU quantities
+	for i := range node.Gpus {
+		node.Gpus[i].Quantity = v1.ResourcePair{
+			Allocatable: gpuTotal.DeepCopy(),
+			Allocated:   AllocatedGPUsQuantity.DeepCopy(),
 		}
 	}
 
-	gpus := v1.GPU{
-		Quantity: &v1.ResourcePair{
-			Allocatable: gpuTotal,
-			Allocated:   *AllocatedGPUsQuantity,
-		},
-		Info: gpuInfos,
+	// Update CPU quantity
+	node.CPU.Quantity = v1.ResourcePair{
+		Allocatable: cpuTotal.DeepCopy(),
+		Allocated:   allocatedCPUsQuantity.DeepCopy(),
 	}
 
-	jsonGpus, err := json.Marshal(gpus)
-	if err != nil {
-		log.Fatalf("Error occurred during marshalling: %s", err)
+	// Update Memory and Storage info
+	node.Memory.Quantity = v1.ResourcePair{
+		Allocatable: memTotal.DeepCopy(),
+		Allocated:   allocatedMemoryQuantity.DeepCopy(),
 	}
 
-	fmt.Println("jsonGpus: ", string(jsonGpus))
-
-	fmt.Println("###gpus: ", gpus)
-
-	fmt.Println("Output from PrintResourcePair:")
-	PrintResourcePair(gpus.Quantity)
-
-	// Construct the CPU info
-	var cpuInfos []*v1.CPUInfo
-	if len(node.CPU.Info) > 0 {
-		cpuInfos = make([]*v1.CPUInfo, len(node.CPU.Info))
-		for i, info := range node.CPU.Info {
-			cpuInfos[i] = &v1.CPUInfo{
-				ID:     info.ID,
-				Vendor: info.Vendor,
-				Model:  info.Model,
-				Vcores: info.Vcores,
+	// Update Storage info
+	if len(node.Storage) > 0 {
+		for i := range node.Storage {
+			node.Storage[i].Quantity = v1.ResourcePair{
+				Allocatable: storageTotal.DeepCopy(),
+				Allocated:   allocatedStorageQuantity.DeepCopy(),
 			}
+			// Update the StorageInfo field
+			// Example: node.Storage[i].Info = ...
 		}
+
 	}
-
-	cpus := v1.CPU{
-		Quantity: &v1.ResourcePair{
-			Allocatable: cpuTotal,
-			Allocated:   *allocatedCPUsQuantity,
-		},
-		Info: cpuInfos,
-	}
-
-	// Construct the Memory info
-	memory := v1.Memory{
-		Quantity: &v1.ResourcePair{
-			Allocatable: memTotal,
-			Allocated:   *allocatedMemoryQuantity,
-		},
-	}
-
-	// Construct the Storage info
-	storage := v1.Storage{
-		Quantity: &v1.ResourcePair{
-			Allocatable: storageTotal,
-			Allocated:   *allocatedStorageQuantity,
-		},
-	}
-
-	// Now the node structure is safely updated with the new information.
-	node.Gpus = gpus
-	node.CPU = cpus
-	node.Memory = memory
-	node.Storage = storage
-
-	jsonNode, err := json.Marshal(node)
-	if err != nil {
-		log.Fatalf("Error occurred during marshalling: %s", err)
-	}
-
-	fmt.Println("jsonNode at end of nodeAllocatableDiscovery: ", string(jsonNode))
-
-	fmt.Println("###Node at end of nodeAllocatableDiscovery: ", node)
 
 	return nil
 }

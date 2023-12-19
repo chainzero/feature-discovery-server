@@ -59,8 +59,8 @@ github.com/OneOfOne/xxhash v1.2.2/go.mod h1:HSdplMjZKSmBqAxg5vPj2TmRDmfkzw+cTzAE
 github.com/VividCortex/gohistogram v1.0.0 h1:6+hBz+qvs0JOrrNhhmR7lFxo5sINxBCGXrdtl/UvroE=
 github.com/VividCortex/gohistogram v1.0.0/go.mod h1:Pf5mBqqDxYaXu3hDrrU+w6nw50o/4+TcAqDqk/vUH7g=
 github.com/aead/siphash v1.0.1/go.mod h1:Nywa3cDsYNNK3gaciGTWPwHt0wlpNV15vwmswBAUSII=
-github.com/akash-network/akash-api v0.0.29 h1:S+GiYldK1UlpfHsSKOccQWGPsW3xqztwi5745lumgv4=
-github.com/akash-network/akash-api v0.0.29/go.mod h1:9aIEhpvAyGQJ4/p1cPo18lG67S0QGT//JLueAXqk6Kw=
+github.com/akash-network/akash-api v0.0.36-0.20231218182721-5b7792116204 h1:PaAwOlhLNad0bnrCcgDD+xfW6FxtANOq6wpEnNSL8t8=
+github.com/akash-network/akash-api v0.0.36-0.20231218182721-5b7792116204/go.mod h1:pW5NnJNhxynCOUGEcgxa338GSU2qzMkpn3MMYcAY6O4=
 github.com/akash-network/cometbft v0.34.27-akash h1:V1dApDOr8Ee7BJzYyQ7Z9VBtrAul4+baMeA6C49dje0=
 github.com/akash-network/cometbft v0.34.27-akash/go.mod h1:BcCbhKv7ieM0KEddnYXvQZR+pZykTKReJJYf7YC7qhw=
 github.com/alecthomas/template v0.0.0-20160405071501-a0175ee3bccc/go.mod h1:LOuyumcjzFXgccqObfd/Ljyb9UuFJ6TxHnclSeseNhc=

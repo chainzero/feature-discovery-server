@@ -1,15 +1,19 @@
-module akash-api
+module featurediscovery
 
 go 1.21
 
 require (
-	github.com/akash-network/akash-api v0.0.29
-	github.com/gogo/protobuf v1.3.3
+	// github.com/akash-network/akash-api v0.0.29
+	// temp until release is available that includes inventory api.  Also remove the associated replace statement when release is available.
+	github.com/akash-network/akash-api v0.34.0
+	github.com/gogo/protobuf v1.3.3 // indirect
 	google.golang.org/grpc v1.53.0
 	k8s.io/api v0.28.3
 	k8s.io/apimachinery v0.28.3
 	k8s.io/client-go v0.28.3
 )
+
+replace github.com/akash-network/akash-api => github.com/akash-network/akash-api v0.0.36-0.20231218182721-5b7792116204
 
 replace (
 	// use cosmos fork of keyring
