@@ -24,15 +24,12 @@ import (
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 
-	// v1 "akash-api/v1"
-
 	v1 "github.com/akash-network/akash-api/go/inventory/v1"
 )
 
 const (
-	nvidiaVendorID = "10de"
-	pciDevicesDir  = "/sys/bus/pci/devices/"
-	// jsonURL             = "https://gist.githubusercontent.com/chainzero/279e737f85d71084725ffde7821a9084/raw/8e891b06c4faa3337a8c62cef917abe353dd9274/akashGpuDatabase.json"
+	nvidiaVendorID      = "10de"
+	pciDevicesDir       = "/sys/bus/pci/devices/"
 	gistID              = "279e737f85d71084725ffde7821a9084"
 	gpuResourceName     = "nvidia.com/gpu"
 	cpuResourceName     = "cpu"

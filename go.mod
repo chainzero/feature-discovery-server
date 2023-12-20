@@ -13,7 +13,7 @@ require (
 	k8s.io/client-go v0.28.3
 )
 
-replace github.com/akash-network/akash-api => github.com/akash-network/akash-api v0.0.36-0.20231218182721-5b7792116204
+replace github.com/akash-network/akash-api => github.com/akash-network/akash-api v0.0.36-rc0
 
 replace (
 	// use cosmos fork of keyring
